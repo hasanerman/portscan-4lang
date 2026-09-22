@@ -151,6 +151,7 @@ General:
 - In C, `WSAStartup` is called once on Windows and `WSACleanup` at exit; Linux needs neither.
 - On a non-blocking socket, readiness for writing is not proof of a successful connection — `SO_ERROR` must be read (Rust's blocking `connect_timeout` does this internally).
 - Banner reads can return partial data; process exactly the number of bytes received. Non-printable bytes are replaced with `.` before printing (the same algorithm in all four: `scan_sanitize_banner` / `sanitizeBanner` / `sanitize_banner` / `SanitizeBanner`).
+- **Banner grabbing only understands plain-text protocols.** The sanitiser stops at the first `\r` or `\n`, which is correct for SSH, SMTP, FTP and HTTP but truncates binary protocols. MySQL on port 3306 is the clearest example: its greeting is `59 00 00 00 0a 35 2e 35 ...`, where byte five is the protocol version `0x0a` — the same byte as `\n`. The scanner stops there and prints `Y...`, even though the version string `5.5.5-10.4.32-MariaDB` sits immediately after it. Extracting versions from binary protocols means teaching the tool each protocol's framing individually; that is what `nmap -sV` does, and it is a project in itself. Treat an empty or truncated banner as "this service does not announce itself in plain text", not as a failure.
 - Use `getaddrinfo` (C/C++) or the language's own resolver for IPv6; never assume IPv4. The local/private check applies the same rules to IPv4 and IPv6 (`::1`, `fe80::/10`, `fd00::/8` and `::ffff:` mapped addresses).
 
 ## Language comparison (measured values)
