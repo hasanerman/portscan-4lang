@@ -205,14 +205,22 @@ async fn repeated_scans_are_stable() {
     let first = port - RANGE_SIZE / 2;
     let port_list: Vec<u16> = (first..first + RANGE_SIZE).collect();
 
-    let baseline = scanner::scan_ports(config, &port_list, 64).await;
-    assert_eq!(baseline[(port - first) as usize].state, PortState::Open);
+    let listener_index = (port - first) as usize;
 
-    for _ in 0..ROUNDS {
+    // Only the port this test owns is asserted on. The rest of the window sits
+    // in the OS ephemeral range, where unrelated processes - including the other
+    // tests in this file, which cargo runs in parallel - claim and release ports
+    // while the scan runs. What repetition proves here is that our own scanner
+    // keeps returning a complete, correctly ordered result set and never loses
+    // the one port we control, which is what a socket leak would break.
+    for _ in 0..=ROUNDS {
         let current = scanner::scan_ports(config, &port_list, 64).await;
-        for (a, b) in baseline.iter().zip(current.iter()) {
-            assert_eq!(a.state, b.state);
+
+        assert_eq!(current.len(), port_list.len());
+        for (expected, result) in port_list.iter().zip(current.iter()) {
+            assert_eq!(*expected, result.port);
         }
+        assert_eq!(current[listener_index].state, PortState::Open);
     }
     drop(listener);
 }

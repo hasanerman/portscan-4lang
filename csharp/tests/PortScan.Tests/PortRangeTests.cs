@@ -221,16 +221,23 @@ public class ScannerTests
         var first = (ushort)(port - RangeSize / 2);
         var ports = Enumerable.Range(0, RangeSize).Select(offset => (ushort)(first + offset)).ToList();
 
-        var baseline = await Scanner.ScanPortsAsync(config, ports, 64);
-        Assert.Equal(PortState.Open, baseline[port - first].State);
+        var listenerIndex = port - first;
 
-        for (var round = 0; round < Rounds; round++)
+        // Only the port this test owns is asserted on. The rest of the window
+        // sits in the OS ephemeral range, where unrelated processes claim and
+        // release ports while the scan runs. Repetition proves that our scanner
+        // keeps returning a complete, correctly ordered result set and never
+        // loses the one port we control, which is what a socket leak would break.
+        for (var round = 0; round <= Rounds; round++)
         {
             var current = await Scanner.ScanPortsAsync(config, ports, 64);
-            for (var i = 0; i < baseline.Count; i++)
+
+            Assert.Equal(ports.Count, current.Count);
+            for (var i = 0; i < current.Count; i++)
             {
-                Assert.Equal(baseline[i].State, current[i].State);
+                Assert.Equal(ports[i], current[i].Port);
             }
+            Assert.Equal(PortState.Open, current[listenerIndex].State);
         }
 
         listener.Dispose();
