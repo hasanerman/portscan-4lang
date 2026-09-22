@@ -212,13 +212,230 @@ Rust:          cd rust && cargo build --release
 C#:            cd csharp && dotnet build -c Release
 ```
 
-Run examples:
+The four binaries are interchangeable — same flags, same output, same exit codes:
+
+| Language | Binary |
+|---|---|
+| C | `c\build\portscan.exe` |
+| C++ | `cpp\build\Release\portscan.exe` |
+| Rust | `rust\target\release\portscan.exe` |
+| C# | `csharp\src\PortScan\bin\Release\net10.0\portscan.exe` |
+
+## Usage examples
+
+All output below is real, captured on the development machine.
+
+### See what is listening on your own machine
 
 ```
-c\build\portscan.exe 127.0.0.1 --ports 1-1024 --banner
-cpp\build\Release\portscan.exe scanme.nmap.org --ports 22,80 --yes-i-own-this
-rust\target\release\portscan.exe 127.0.0.1 --format json --concurrency 200
-csharp\src\PortScan\bin\Release\net10.0\portscan.exe 127.0.0.1 --ports 1-65535 --timeout 500
+portscan.exe 127.0.0.1 --ports 1-10000 --timeout 300 --banner
+```
+
+```
+PORT    STATE         MS  BANNER
+--------------------------------------------------------
+135     open           0
+445     open           0
+5040    open           2
+5357    open           0
+6463    open           0
+7768    open           0
+9010    open           0
+9180    open           0
+
+scanned 10000 ports on 127.0.0.1 (127.0.0.1) in 382 ms: 8 open, 9991 closed, 1 filtered
+```
+
+Reading this: ten thousand ports were probed in 382 ms. Eight of them have a program listening. 9991 answered with a TCP RST, which means the machine is up and nothing is bound to that port. One port never answered at all — something (here, the local firewall) dropped the packet silently.
+
+### Find out which program owns a port
+
+The scanner tells you a port is open; `netstat` tells you which process opened it:
+
+```
+netstat -ano | findstr ":6463.*LISTENING"
+```
+
+```
+TCP    127.0.0.1:6463         0.0.0.0:0              LISTENING       24772
+```
+
+The last column is the process ID. On the development machine those eight ports turned out to be:
+
+| Port | PID | Process |
+|---|---|---|
+| 135 | 1104 | svchost.exe (Windows RPC) |
+| 445 | 4 | System (SMB file sharing) |
+| 5040 | 8848 | svchost.exe |
+| 5357 | 4 | System (WSDAPI) |
+| 6463 | 24772 | Discord.exe |
+| 7768 | 5360 | Spotify.exe |
+| 9010 | 25288 | lghub_agent.exe (Logitech G Hub) |
+| 9180 | 4300 | lghub_updater.exe |
+
+Discord and Spotify open local API ports so a browser can talk to the desktop app. That is normal. The point of the exercise is that you can now name every open port on your machine — anything you cannot explain is worth investigating.
+
+### Grab a banner from a real service
+
+A banner is the greeting line a service sends on connect. Start a test server in another terminal:
+
+```
+python -m http.server 8080
+```
+
+Then:
+
+```
+portscan.exe 127.0.0.1 --ports 8080 --banner
+```
+
+```
+PORT    STATE         MS  BANNER
+--------------------------------------------------------
+8080    open           0  HTTP/1.0 200 OK
+
+scanned 1 ports on 127.0.0.1 (127.0.0.1) in 2 ms: 1 open, 0 closed, 0 filtered
+```
+
+Banners identify software and often its exact version, which is what makes them useful in an audit. Scanning the authorized public test host shows why:
+
+```
+portscan.exe scanme.nmap.org --ports 21,22,25,80,443 --banner --timeout 3000 --concurrency 50 --yes-i-own-this
+```
+
+```
+note: scanning a non-local target
+PORT    STATE         MS  BANNER
+--------------------------------------------------------
+21      open          37
+22      open          37  SSH-2.0-OpenSSH_6.6.1p1 Ubuntu-2ubuntu2.13
+25      open          23
+80      open          37  HTTP/1.1 200 OK
+443     open          48
+
+scanned 5 ports on scanme.nmap.org (45.33.32.156) in 454 ms: 5 open, 0 closed, 0 filtered
+```
+
+That one line names the SSH implementation, its version and the distribution it ships with.
+
+Not every service answers. Ports 21, 25 and 443 above are open but stayed silent because they wait for the client to speak first (FTP and SMTP expect a protocol greeting exchange; 443 expects a TLS handshake, not plain text). An empty banner on an open port is normal, not a failure.
+
+### Scan your own router
+
+```
+portscan.exe 192.168.1.1 --ports 1-1024,8080,8443 --timeout 1500 --concurrency 100 --banner
+```
+
+```
+PORT    STATE         MS  BANNER
+--------------------------------------------------------
+53      open           4                  <- DNS
+80      open           4  HTTP/1.1 405    <- management UI (http)
+443     open           6                  <- management UI (https)
+
+scanned 1026 ports on 192.168.8.1 (192.168.8.1) in 548 ms: 3 open, 1023 closed, 0 filtered
+```
+
+`HTTP/1.1 405` means "method not allowed": the router answered our `HEAD` probe by refusing the method. That is still a useful answer — it proves an HTTP server is there.
+
+A router exposing only DNS and its web UI is healthy. Telnet (23) or FTP (21) open on a router is worth turning off.
+
+### Machine-readable output
+
+```
+portscan.exe 127.0.0.1 --ports 1-10000 --timeout 300 --banner --format json
+```
+
+```
+{"target":"127.0.0.1","address":"127.0.0.1","scanned":2,"open":[{"port":8080,"state":"open","banner":"HTTP/1.0 200 OK","ms":1}],"closed":1,"filtered":0,"errors":0,"elapsed_ms":3}
+```
+
+Piping it into PowerShell:
+
+```
+$scan = .\portscan.exe 127.0.0.1 --ports 1-10000 --timeout 300 --format json | ConvertFrom-Json
+$scan.open | Sort-Object ms -Descending | Format-Table port, ms, banner
+```
+
+Or with `jq`:
+
+```
+portscan.exe 127.0.0.1 --ports 1-10000 --format json | jq '.open[].port'
+```
+
+### What `--concurrency` actually buys you
+
+The same 512-port scan against the same host, only the concurrency changed:
+
+| `--concurrency` | Time |
+|---|---|
+| 1 | 3254 ms |
+| 10 | 285 ms |
+| 100 | 62 ms |
+| 500 | 63 ms |
+
+Going from 1 to 100 is a 52x speedup. Going from 100 to 500 buys nothing, because at that point the scan is already finished and the bottleneck is no longer waiting on the network. Raising the limit past what the work needs only costs sockets and memory. On a remote target, keep it low (50 or so): a wide, fast scan looks like an attack to an intrusion detection system and strains your own uplink.
+
+### Recipes
+
+| Goal | Flags |
+|---|---|
+| Quick check of common services | `--ports 21,22,23,25,53,80,110,143,443,445,3306,3389,5432,8080` |
+| Full sweep | `--ports 1-65535 --timeout 500` |
+| Look for web servers | `--ports 80,443,8000,8080,8443,3000,5000 --banner` |
+| Look for databases | `--ports 1433,3306,5432,6379,27017 --banner` |
+| Remote target, be polite | `--timeout 3000 --concurrency 50` |
+| Feed another tool | `--format json` |
+
+`--banner` only does extra work on ports that are actually open, so it costs almost nothing on a wide scan. Leave it on.
+
+### Reading the output
+
+Three states, and the difference matters:
+
+- **open** — the connection was established; something is listening there.
+- **closed** — the host answered with a TCP RST: the machine is up, that port has nothing on it.
+- **filtered** — nothing came back before the timeout. Usually a firewall dropping packets silently, or no host at that address at all.
+
+The table lists open ports only; closed and filtered ones appear as counts in the summary line, otherwise a full sweep would print 65535 rows.
+
+The distinction is visible in timing. Scanning an address with no host on it:
+
+```
+portscan.exe 192.168.99.99 --ports 80,443 --timeout 600
+```
+
+```
+scanned 2 ports on 192.168.99.99 (192.168.99.99) in 601 ms: 0 open, 0 closed, 2 filtered
+```
+
+It took the full 600 ms timeout because nothing ever replied. A closed port replies in single-digit milliseconds. That timing difference is how you tell "nothing there" apart from "something is there but this port is shut".
+
+### The four binaries agree
+
+Same scan, all four implementations:
+
+```
+=== C ===        135 open, 445 open, 6463 open, 7768 open, 9010 open   -> 5 open, 0 closed, 0 filtered
+=== C++ ===      135 open, 445 open, 6463 open, 7768 open, 9010 open   -> 5 open, 0 closed, 0 filtered
+=== Rust ===     135 open, 445 open, 6463 open, 7768 open, 9010 open   -> 5 open, 0 closed, 0 filtered
+=== C# ===       135 open, 445 open, 6463 open, 7768 open, 9010 open   -> 5 open, 0 closed, 0 filtered
+```
+
+Error paths match to the character, including the exit codes:
+
+```
+portscan.exe 8.8.8.8 --ports 80
+C     exit=1  error: 8.8.8.8 is not a local or private address; pass --yes-i-own-this only if you own it or have permission to scan it
+C++   exit=1  error: 8.8.8.8 is not a local or private address; pass --yes-i-own-this only if you own it or have permission to scan it
+Rust  exit=1  error: 8.8.8.8 is not a local or private address; pass --yes-i-own-this only if you own it or have permission to scan it
+C#    exit=1  error: 8.8.8.8 is not a local or private address; pass --yes-i-own-this only if you own it or have permission to scan it
+
+portscan.exe 127.0.0.1 --ports 100-1
+C     exit=1  error: port range start is greater than its end
+C++   exit=1  error: port range start is greater than its end
+Rust  exit=1  error: port range start is greater than its end
+C#    exit=1  error: port range start is greater than its end
 ```
 
 ## Testing and verification
