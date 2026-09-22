@@ -1,24 +1,34 @@
-# 02 - Asenkron Port Scanner and Banner Grabber
+# portscan-4lang - Asynchronous Port Scanner and Banner Grabber
 
-## Amac
+The same port scanner, written four times: in C, C++, Rust and C#. All four implement the same command line contract, print the same table and pass the same tests. Then the difference between them is measured.
 
-Verilen IP adresi (veya ana bilgisayar adi) ve port araligini hizlica tarayan, acik portlardan banner (servis tanitim metni) toplayan ve sonucu tablo veya JSON olarak veren arac. Ayni arac C (thread havuzu), C++ (thread havuzu, RAII), Rust (tokio + spawn_blocking) ve C# (async/await) ile yazilir. Ana amac senkron, cok izlekli ve asenkron I/O modellerinin farkini gormektir.
+Status: all four languages are complete, they build, their tests pass and the benchmarks have been taken.
 
-Durum: dort dil de tamamlandi, derleniyor, testleri geciyor ve olcumleri alindi.
+## Purpose
 
-## Guvenlik ve hukuki sinir
+A command line tool that scans a port range on a given IP address or hostname, grabs banners (service identification text) from open ports, and reports the result as a table or JSON. The same tool is written separately in four languages; the goal is to see side by side how the synchronous, thread-based and asynchronous I/O models actually differ.
 
-Yalnizca kendi makinende (`127.0.0.1`), kendi agindaki cihazlarda veya acikca izin verilen hedeflerde kullanilir. Aracin hedefi yerel/ozel ag degilse (RFC1918, loopback, link-local disinda) uyari yazdirilir ve `--yes-i-own-this` bayragi istenir; bayrak verilmezse arac taramayi reddedip cikis kodu 1 ile sonlanir. Bu davranis dort dilde de canli test edilmistir (asagida).
+This repository is the second of a 12-project series in which I solve the same problem in four languages and compare them by measurement rather than by opinion. Each project lives in its own repository. Rules that hold across the series:
 
-## Komut satiri sozlesmesi (tum diller)
+- Language comparisons are measured, never guessed; the method and the environment are always stated.
+- Errors are never swallowed silently: return codes in C, `std::expected` in C++, `Result` in Rust, exceptions in C#.
+- Tests are mandatory; each language uses its own test tooling.
+- Compiler warnings are treated as errors (`/W4 /WX`, `-Wall -Wextra -Werror`, `clippy -D warnings`, `TreatWarningsAsErrors`).
+
+## Safety and legal boundary
+
+Use this only against your own machine (`127.0.0.1`), devices on your own network, or targets you have explicit permission to scan. If the resolved target is not a loopback, private (RFC 1918) or link-local address, the tool refuses to scan and exits with code 1 unless `--yes-i-own-this` is passed. This guard is live-tested in all four implementations (see below).
+
+## Command line interface (shared contract for all four languages)
 
 ```
-portscan <hedef> [--ports 1-1024|22,80,443] [--timeout <ms>] [--concurrency <n>] [--banner] [--format table|json] [--yes-i-own-this]
+portscan <target> [--ports 1-1024|22,80,443] [--timeout <ms>] [--concurrency <n>] [--banner] [--format table|json] [--yes-i-own-this]
 ```
 
-Varsayilanlar: `--ports 1-1024`, `--timeout 800`, `--concurrency 500`, `--format table`. `--timeout` 50-60000 ms, `--concurrency` 1-10000 araliginda olmalidir. Cikis kodlari: 0 tarama bitti, 1 gecersiz arguman veya izin reddi, 2 hedef cozumlenemedi.
+Defaults: `--ports 1-1024`, `--timeout 800`, `--concurrency 500`, `--format table`. `--timeout` must be between 50 and 60000 ms, `--concurrency` between 1 and 10000. Exit codes: 0 scan finished, 1 invalid argument or refused permission, 2 target could not be resolved.
 
-Ornek cikti (tablo):
+Table output:
+
 ```
 PORT    STATE         MS  BANNER
 --------------------------------------------------------
@@ -28,59 +38,63 @@ PORT    STATE         MS  BANNER
 scanned 9 ports on 127.0.0.1 (127.0.0.1) in 412 ms: 2 open, 7 closed, 0 filtered
 ```
 
-Ornek cikti (JSON):
+JSON output:
+
 ```
 {"target":"127.0.0.1","address":"127.0.0.1","scanned":50,"open":[],"closed":50,"filtered":0,"errors":0,"elapsed_ms":2}
 ```
 
-## Dosya sayisi ve dosya yapisi
+## File count and layout
 
-Toplam 59 dosya: 2 proje dokumani, 1 olcum betigi, 56 dil dosyasi (C 15, C++ 16, Rust 9, C# 9, artik dosyalar dahil).
+62 files in total: 1 document, 1 benchmark script, 1 build-all script, 3 repository files and 56 source files (C 19, C++ 16, Rust 11, C# 10).
 
 ```
-02-port-scanner/
+portscan-4lang/
   README.md
-  edu.md
-  bench.ps1                  (dort ikiliyi olcen PowerShell betigi)
-  c/                          (14 dosya)
+  bench.ps1                  (PowerShell script that benchmarks all four binaries)
+  buildeverything.bat        (builds and tests all four languages with one command)
+  LICENSE
+  .gitignore
+  .gitattributes
+  c/                         (19 files)
     Makefile                 (GNU make, Linux)
-    build.bat                (MSVC, Windows; "build.bat test" testleri de calistirir)
-    src/main.c               (arguman akisi, tarama akisi, izin kontrolu)
+    build.bat                (MSVC, Windows; "build.bat test" also runs the tests)
+    src/main.c               (argument flow, scan flow, permission guard)
     src/args.c / args.h
-    src/ports.c / ports.h    (port araligi ayristirici)
-    src/net.h                (ortak platform arayuzu)
-    src/net_addr.c           (adres cozumleme, yerel/ozel ag tespiti)
-    src/net_sock.c           (soket: connect, poll/select, SIO_TCP_INITIAL_RTO)
-    src/scan.c / scan.h      (tek port tarama, banner)
-    src/pool.c / pool.h      (sabit boyutlu thread havuzu)
-    src/report.c / report.h (tablo ve JSON cikti)
-    tests/test_ports.c       (port araligi + arguman testleri)
-    tests/test_scan.c        (gercek loopback dinleyicisiyle ag testleri)
+    src/ports.c / ports.h    (port range parser)
+    src/net.h                (shared platform interface)
+    src/net_addr.c           (address resolution, local/private network detection)
+    src/net_sock.c           (sockets: connect, poll/select, SIO_TCP_INITIAL_RTO)
+    src/scan.c / scan.h      (single-port scan, banner grab)
+    src/pool.c / pool.h      (fixed-size thread pool)
+    src/report.c / report.h  (table and JSON output)
+    tests/test_ports.c       (port range + argument tests)
+    tests/test_scan.c        (network tests against a real loopback listener)
     tests/test_report.c
-  cpp/                        (15 dosya)
+  cpp/                       (16 files)
     CMakeLists.txt
     src/main.cpp
     src/Args.hpp / Args.cpp
     src/Ports.hpp / Ports.cpp
-    src/Socket.hpp           (ortak arayuz, UniqueSocket RAII)
+    src/Socket.hpp           (shared interface, UniqueSocket RAII wrapper)
     src/WinSocket.cpp / LinuxSocket.cpp
     src/Scanner.hpp / Scanner.cpp
     src/Report.hpp / Report.cpp
     tests/test_ports.cpp
     tests/test_scan.cpp
     tests/test_report.cpp
-  rust/                       (9 dosya)
+  rust/                      (11 files)
     Cargo.toml / Cargo.lock
-    src/lib.rs
+    src/lib.rs               (module tree; library target needed for integration tests)
     src/main.rs
     src/cli.rs
     src/ports.rs
-    src/local.rs              (yerel/ozel ag tespiti)
-    src/scanner.rs            (socket2 + spawn_blocking, bkz. asagida)
+    src/local.rs             (local/private network detection)
+    src/scanner.rs           (socket2 + spawn_blocking, see below)
     src/report.rs
     src/error.rs
     tests/scan_test.rs
-  csharp/                     (8 dosya)
+  csharp/                    (10 files)
     PortScan.slnx
     src/PortScan/PortScan.csproj
     src/PortScan/Program.cs
@@ -93,124 +107,113 @@ Toplam 59 dosya: 2 proje dokumani, 1 olcum betigi, 56 dil dosyasi (C 15, C++ 16,
     tests/PortScan.Tests/PortRangeTests.cs
 ```
 
-Ilk planlamadan farklar ve nedenleri:
-- C'de tek `net.c` yerine `net_addr.c` (adres/DNS) ve `net_sock.c` (soket/connect/poll) ayrildi; her dosya tek bir sorumluluk tasisin diye.
-- C++'ta `Socket.hpp` platform-bagimsiz arayuzu tanimlar, `WinSocket.cpp`/`LinuxSocket.cpp` onu uygular; C'deki ayrimla birebir eslesir.
-- Rust'ta ozel bir `banner.rs` yazilmadi; banner mantigi `scanner.rs` icinde kaldi cunku connect ve banner okuma ayrilamayacak kadar ic ice (asagida acilaniyor).
-- C#'ta `PortRange.cs` planlanan `Args.cs` port ayristirmasindan ayrildi, testlerin port mantigini bagimsiz dogrulayabilmesi icin. Ayrica `LocalAddress.cs` eklendi.
+Differences from the original plan and why:
+- C splits the network layer into `net_addr.c` (addresses and DNS) and `net_sock.c` (sockets, connect, poll) instead of one `net.c`, so each file carries a single responsibility.
+- C++ mirrors that split: `Socket.hpp` declares the platform-independent interface, `WinSocket.cpp` and `LinuxSocket.cpp` implement it.
+- Rust has no separate `banner.rs`; banner reading stayed inside `scanner.rs` because connecting and reading are too tightly coupled to separate meaningfully (explained below).
+- C# gained `PortRange.cs` (split out of argument parsing so the port logic can be tested on its own) and `LocalAddress.cs`.
 
-## Mimari
+## Architecture
 
-Katmanlar (dort dilde ayni):
-1. Girdi: arguman ayristirma, hedef cozumleme (DNS/literal), port listesi uretimi (`1-1024`, `22,80,443` bicimleri, tekrarlar elenir, sirali kume).
-2. Tarama cekirdegi: her port icin `connect` denemesi, zaman asimi, `open`/`closed`/`filtered`/`error` sinifi.
-3. Banner katmani: acik porta baglanildiktan sonra en fazla 1024 bayt okunur; HTTP portlarinda (`80/8000/8080/8888`) once `HEAD / HTTP/1.0` gonderilir.
-4. Rapor: tablo (yalnizca acik portlar listelenir) veya JSON (`open` dizisi + `closed`/`filtered`/`errors` sayaclari).
+The same four layers in every language:
 
-Es zamanlilik modeli (dile gore degisen tek katman):
-- **C:** sabit boyutlu thread havuzu (`pool.c`, `--concurrency` ile sinirli, ust sinir 512), is dagitimi atomik sayacla (`InterlockedIncrement` / `__atomic_fetch_add`). Zaman asimi: non-blocking soket + `select` (Windows) / `poll` (Linux).
-- **C++:** `std::jthread` havuzu, is dagitimi `std::atomic<size_t>` ile; `scanPorts` fonksiyonu esiktir. `UniqueSocket` RAII ile handle/fd otomatik kapanir.
-- **Rust:** `tokio::spawn` + `Semaphore` gorev sayisini sinirlar, ama asil TCP baglantisi `tokio::task::spawn_blocking` icinde **senkron** `socket2::Socket::connect_timeout` ile yapilir (nedeni asagida "Windows SYN retransmisyonu" bolumunde).
-- **C#:** `Task.Run` + `SemaphoreSlim` ile es zamanlilik siniri; `Socket.ConnectAsync` + `CancellationTokenSource(timeout)`.
+1. **Input:** argument parsing, target resolution (literal IP or DNS), port list generation (`1-1024`, `22,80,443`; duplicates removed, result is a sorted set).
+2. **Scan core:** a `connect` attempt per port with a timeout, classified as `open` / `closed` / `filtered` / `error`.
+3. **Banner layer:** after connecting, read at most 1024 bytes; on HTTP ports (`80/8000/8080/8888`) send `HEAD / HTTP/1.0` first, because those services wait for a request before saying anything.
+4. **Report:** a table (open ports only) or JSON (an `open` array plus `closed`/`filtered`/`errors` counters).
 
-## Windows SYN retransmisyonu: dort dilde ayni sorun, dort farkli cozum
+The concurrency model is the only layer that genuinely differs per language:
 
-Bu proje calisirken karsilasilan en onemli teknik sorun buydu ve dort dilin hepsini etkiledi. Windows, reddedilen bir TCP baglantisinda bile (RST hemen donse dahi) varsayilan olarak yaklasik 2 saniyelik bir SYN yeniden gonderim (retransmission) dongusune girer -- **loopback'te bile**. Bu, 1024 portluk bir taramayi dakikalar suren bir isleme cevirir.
+- **C:** a fixed-size thread pool (`pool.c`, bounded by `--concurrency`, hard cap 512), work handed out through an atomic counter (`InterlockedIncrement` / `__atomic_fetch_add`). Timeouts come from a non-blocking socket plus `select` (Windows) or `poll` (Linux).
+- **C++:** a `std::jthread` pool with a `std::atomic<size_t>` work counter; `scanPorts` is the only entry point. `UniqueSocket` closes every handle through RAII.
+- **Rust:** `tokio::spawn` plus a `Semaphore` bounds the number of in-flight tasks, but the actual TCP connect runs **synchronously** inside `tokio::task::spawn_blocking` via `socket2::Socket::connect_timeout` — see the next section for why.
+- **C#:** `Task.Run` plus `SemaphoreSlim` for the concurrency limit; `Socket.ConnectAsync` with a `CancellationTokenSource(timeout)`.
 
-Cozum, `mstcpip.h` icindeki `SIO_TCP_INITIAL_RTO` soket kontrolu ile `MaxSynRetransmissions` alanini `TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS` yapmaktir. Bu sabitin gercek degeri **`(UCHAR)-2` yani `0xFE`**'dir (Windows SDK `mstcpip.h`, satir 314) -- `0xFF` degil. Bu ayrim onemlidir: `0xFF` aslinda `TCP_INITIAL_RTO_UNSPECIFIED_MAX_SYN_RETRANSMISSIONS` sabitidir ve "sistem varsayilanini kullan" anlamina gelir, yani tam olarak kacinilmak istenen 2 saniyelik gecikmeyi geri getirir.
+## Windows SYN retransmission: one problem, four different encounters
 
-- **C ve C++:** gercek `mstcpip.h` basligindaki adlandirilmis sabiti kullandiklari icin dogru degeri otomatik aldilar; ilk denemede calisti.
-- **Rust:** `windows-sys` crate'i bu sabiti disa aktarmiyor (yalnizca ham `WSAIoctl` cagrisini saglar), bu yuzden deger elle yazildi ve ilk seferde yanlislikla `0xFF` yazildi. Sonuc: testler 168 saniye surdu ve kapali portlar `Filtered` olarak raporlandi. `mstcpip.h` dogrudan okunarak `0xFE` oldugu dogrulandi ve duzeltildi (testler 0.26 saniyeye dustu).
-- **C#:** ayni sabit `Socket.IOControl` ile elle bayt dizisi olarak gonderilir; dogru deger (`0xFE`) PowerShell ile onceden deneysel olarak dogrulanip kullanildi.
+This was the single most interesting technical problem in the project, and it hit all four languages. Windows walks through its default SYN retransmission schedule — roughly two seconds — even for a connection that is refused outright, **including on loopback**. That turns a 1024-port scan into a multi-minute job.
 
-**Rust'ta ikinci bir surpriz:** dogru sabitle bile `tokio::net::TcpStream::connect` (tokio'nun kendi async connect'i, Windows'ta IOCP/AFD tabanli mio arka ucunu kullanir) hicbir zaman "hazir" bildirimi almadi -- baglanti ne basarili ne basarisiz oldu, yalnizca bizim kendi zaman asimimiz (2000 ms) devreye girip `Filtered` dondurdu. Ayni sorun, elle olusturulan soketi `TcpStream::from_std` ile tokio'ya devrettigimizde de tekrarlandi. Kanit: C, C++ ve elle yazilmis bir PowerShell/.NET denemesi ayni ioctl ile 0-30 ms'de basarili oldu; yalnizca tokio'nun IOCP tabanli async connect'i bu sinyali gormedi. Cozum: gercek TCP islemini (`connect` + `poll`/`select`) C ve C++'taki gibi **senkron** yapip `tokio::task::spawn_blocking` icine almak; es zamanlilik sinirini tokio'nun blocking thread havuzu (`max_blocking_threads`, `--concurrency` ile eslenir) uzerinden korumak. Bu, "async calisma zamani her zaman en dogru arac degildir" dersinin somut bir ornegidir.
+The fix is the `SIO_TCP_INITIAL_RTO` socket control from `mstcpip.h`, setting `MaxSynRetransmissions` to `TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS`. The real value of that constant is **`(UCHAR)-2`, i.e. `0xFE`** (Windows SDK `mstcpip.h`, line 314) — not `0xFF`. The distinction matters: `0xFF` is `TCP_INITIAL_RTO_UNSPECIFIED_MAX_SYN_RETRANSMISSIONS`, which means "keep the system default" and therefore restores exactly the two-second delay you were trying to avoid.
 
-## Islem yaparken dikkat edilecekler
+- **C and C++** use the named constant from the real header, so they got the right value for free and worked on the first try.
+- **Rust:** the `windows-sys` crate does not export the constant (only the raw `WSAIoctl` binding), so the value was written by hand — and the first attempt used `0xFF`. The result: the test suite took 168 seconds and closed ports were reported as `Filtered`. Reading `mstcpip.h` directly confirmed `0xFE` and fixed it; the suite then ran in 0.26 seconds.
+- **C#** sends the same control through `Socket.IOControl` as a hand-built byte array; the correct value (`0xFE`) was verified experimentally with PowerShell before being written into the code.
 
-Genel:
-- Isletim sisteminin acik dosya/soket sinirina dikkat: Linux'ta `ulimit -n` (varsayilan 1024), Windows'ta ephemeral port araligi. `--concurrency` bu sinirdan kucuk tutulmalidir; C ve C++ 512 ust siniri kendileri uygular.
-- Zaman asimi olmadan `connect` cagrilmaz; filtrelenmis (firewall) portlar baglantiyi bekletir, gercek zaman asimi ile `filtered` olarak isaretlenir.
-- Port durumlari dort tanedir: `open`, `closed` (RST/reddedildi), `filtered` (zaman asimi veya erisim engeli), `error` (siniflandirilamayan). Yalnizca acik portlar tabloya yazilir; kapali ve filtrelenmis olanlar yalnizca ozet sayaclarda gorunur.
-- Soketler her yolda kapatilmalidir; C `goto`suz erken donuslerle, C++ `UniqueSocket` yikicisiyla, Rust `Drop` ile (socket2 + std TcpStream), C# `using` ile saglar.
-- C'de Windows icin `WSAStartup` bir kez cagrilir, program sonunda `WSACleanup`. Linux'ta gerek yoktur.
-- Non-blocking soket hazirlik kontrolunde `SO_ERROR` okunmalidir; sadece yazilabilir olmasi baglantinin basarili oldugunu garanti etmez (C, C++, Rust'in blocking connect_timeout'u bunu kendi icinde yapar).
-- Banner okumada kesik veri gelebilir; okunan bayt sayisi kadar isle. Yazdirmadan once yazdirilamayan baytlar `.` ile degistirilir (dort dilde ayni algoritma: `sanitize_banner` / `SanitizeBanner` / `scan_sanitize_banner`).
-- IPv6 icin `getaddrinfo` (C/C++) veya dilin kendi cozumleyicisi kullanilir; sabit IPv4 varsayilmaz. Yerel/ozel ag testi hem IPv4 hem IPv6 (`::1`, `fe80::/10`, `fd00::/8`, `::ffff:` eslemeli adresler) icin ayni kurallarla calisir.
+**A second surprise in Rust:** even with the right constant, `tokio::net::TcpStream::connect` (tokio's own async connect, which uses the IOCP/AFD-based mio backend on Windows) never produced a readiness signal for a refused connection — it neither succeeded nor failed, and only our own 2000 ms timeout fired, yielding `Filtered`. Handing a manually created socket to tokio via `TcpStream::from_std` behaved the same way. The evidence that this was tokio-specific: C, C++ and a hand-written PowerShell/.NET probe all completed in 0–30 ms with the identical ioctl applied. The fix was to do the real TCP work (`connect` plus `poll`/`select`) synchronously, exactly as C and C++ do, and wrap it in `tokio::task::spawn_blocking`, keeping the concurrency bound through tokio's blocking thread pool (`max_blocking_threads`, matched to `--concurrency`). It is a concrete lesson that an async runtime is not automatically the right tool.
 
-## Dil karsilastirma tablosu (olculen degerler)
+## Things to watch out for
 
-Olcum ortami: Windows 10 Pro 19045, x64, MSVC 14.51, rustc 1.95.0, .NET 10.0.400. Hedef `127.0.0.1`, 7 kosudan ilki atilip 6 kosunun ortalamasi (`bench.ps1`).
+General:
+- Mind the OS limit on open sockets and file descriptors: `ulimit -n` on Linux (1024 by default), the ephemeral port range on Windows. `--concurrency` must stay under it; C and C++ additionally enforce a 512 cap of their own.
+- Never call `connect` without a timeout; a filtered (firewalled) port will keep the connection pending until the timeout marks it `filtered`.
+- There are four port states: `open`, `closed` (RST / refused), `filtered` (timeout or access denied) and `error` (anything that could not be classified). Only open ports are listed in the table; closed and filtered ones appear only in the summary counters.
+- Sockets must be closed on every path: C through early returns, C++ through the `UniqueSocket` destructor, Rust through `Drop`, C# through `using`.
+- In C, `WSAStartup` is called once on Windows and `WSACleanup` at exit; Linux needs neither.
+- On a non-blocking socket, readiness for writing is not proof of a successful connection — `SO_ERROR` must be read (Rust's blocking `connect_timeout` does this internally).
+- Banner reads can return partial data; process exactly the number of bytes received. Non-printable bytes are replaced with `.` before printing (the same algorithm in all four: `scan_sanitize_banner` / `sanitizeBanner` / `sanitize_banner` / `SanitizeBanner`).
+- Use `getaddrinfo` (C/C++) or the language's own resolver for IPv6; never assume IPv4. The local/private check applies the same rules to IPv4 and IPv6 (`::1`, `fe80::/10`, `fd00::/8` and `::ffff:` mapped addresses).
 
-| Konu | C | C++ | Rust | C# |
+## Language comparison (measured values)
+
+Environment: Windows 10 Pro 19045, x64, MSVC 14.51, rustc 1.95.0, .NET 10.0.400. Target `127.0.0.1`, average of 6 runs after discarding the first of 7 (`bench.ps1`).
+
+| Topic | C | C++ | Rust | C# |
 |---|---|---|---|---|
-| Es zamanlilik birimi | OS thread havuzu (~512 ust sinir) | OS thread havuzu (`jthread`, ~512 ust sinir) | Async gorev + blocking havuz (`spawn_blocking`) | Task (thread havuzu) |
-| Baglanti mekanizmasi | non-blocking connect + `select`/`poll` | ayni, RAII ile | senkron `socket2::connect_timeout` (bkz. yukarida) | `Socket.ConnectAsync` + `CancellationToken` |
-| Veri yarisi korumasi | atomik sayac (is dagitimi) | `std::atomic<size_t>` | derleyici (`Send`/`Sync`) + `Semaphore` | `SemaphoreSlim` |
-| Windows RTO duzeltmesi | `mstcpip.h` sabiti (otomatik dogru) | `mstcpip.h` sabiti (otomatik dogru) | elle `0xFE` (ilk denemede `0xFF` yazilip duzeltildi) | elle `0xFE` (PowerShell ile onceden dogrulandi) |
-| Kaynak satiri (test dahil) | 1085 | 1006 | 733 | 799 |
-| Ikili boyut (release) | 156.0 KB | 254.5 KB | 461.0 KB | 158.5 KB apphost + dll |
-| 1024 port, localhost, calisma suresi (ortalama) | 49.4 ms | 47.8 ms | 61.8 ms | 161.2 ms |
-| 1024 port, localhost, calisma suresi (en iyi) | 37.4 ms | 44.3 ms | 31.0 ms | 93.9 ms |
-| 65535 port, timeout 500 ms, calisma suresi | 528 ms | 548 ms | 708.6 ms | 1082.1 ms |
-| Tepe RAM (1024 port tarama) | 10.7 MB | 9.2 MB | 12.8 MB | 31.2 MB |
-| Tepe RAM (65535 port tarama) | 20.6 MB | 18.0 MB | 41.1 MB | 71.9 MB |
-| Bellek guvenligi | Programci sorumlu | RAII ile buyuk olcude | Derleyici garantisi | GC + managed |
+| Unit of concurrency | OS thread pool (512 cap) | OS thread pool (`jthread`, 512 cap) | async task + blocking pool (`spawn_blocking`) | Task (thread pool) |
+| Connect mechanism | non-blocking connect + `select`/`poll` | same, with RAII | synchronous `socket2::connect_timeout` (see above) | `Socket.ConnectAsync` + `CancellationToken` |
+| Data-race protection | atomic work counter | `std::atomic<size_t>` | compiler (`Send`/`Sync`) + `Semaphore` | `SemaphoreSlim` |
+| Windows RTO fix | `mstcpip.h` constant (correct for free) | `mstcpip.h` constant (correct for free) | hand-written `0xFE` (first attempt `0xFF`, fixed) | hand-written `0xFE` (verified with PowerShell first) |
+| Source lines (tests included) | 1085 | 1006 | 733 | 799 |
+| Binary size (release) | 156.0 KB | 254.5 KB | 461.0 KB | 158.5 KB apphost + dll |
+| 1024 ports, localhost (average) | 49.4 ms | 47.8 ms | 61.8 ms | 161.2 ms |
+| 1024 ports, localhost (best) | 37.4 ms | 44.3 ms | 31.0 ms | 93.9 ms |
+| 65535 ports, 500 ms timeout | 528 ms | 548 ms | 708.6 ms | 1082.1 ms |
+| Peak RAM (1024-port scan) | 10.7 MB | 9.2 MB | 12.8 MB | 31.2 MB |
+| Peak RAM (65535-port scan) | 20.6 MB | 18.0 MB | 41.1 MB | 71.9 MB |
+| Memory safety | programmer's responsibility | largely handled by RAII | guaranteed by the compiler | GC + managed |
 
-Acik port sayisi (135, 445 gibi Windows servisleri) olcumler arasinda 22-25 arasinda degisti; fark dil hatasi degil, tarama anindaki canli sistem durumudur (gecici portlarin acilip kapanmasi) -- ayni ikili art arda calistirildiginda tutarli sonuc verir (22, tekrar kontrol edildi).
+The open-port count (Windows services such as 135 and 445) varied between 22 and 25 across measurements. That is not a language difference but live system state — ephemeral ports opening and closing during the scan. Running the same binary back to back gives a consistent answer (22, re-checked).
 
-Tablodaki degerlerin okunmasi:
-- C ve C++ yine en hizli ve en az bellek kullanan surumler; C++ RAII'nin bedeli olcum gurultusu seviyesinde.
-- Rust'in en iyi kosusu (31 ms) C'den bile hizli, ama ortalamasi (61.8 ms) daha yuksektir: `spawn_blocking` gorevlerinin tokio'nun blocking havuzuna alinmasi degisken bir zamanlama ek yuku getirir. 65535 portluk buyuk taramada bu fark daha belirgindir.
-- C#'in yavasligi (161 ms / 1082 ms) buyuk olcude `Socket.ConnectAsync(EndPoint, CancellationToken)` overload'unun her cagrida bir `CancellationTokenSource` ve Task durum makinesi kurmasindan gelir; JIT ve runtime baslatma maliyeti de ilk turlerde eklenir.
-- Rust'in ikili boyutu en buyuk (461 KB): `tokio` calisma zamaninin tamami statik olarak baglanir; buna karsilik en az kaynak satirina (733) sahiptir.
+How to read these numbers:
 
-## Gelistirme asamalari
+1. **C and C++ are again the fastest and the leanest**, and the cost of C++'s RAII is within measurement noise. The price shows up in binary size: 254 KB against 156 KB.
+2. **Rust's best run (31 ms) beats C**, but its average (61.8 ms) is higher: handing every scan to tokio's blocking pool adds variable scheduling overhead. The gap widens on the 65535-port scan.
+3. **C#'s 161 ms / 1082 ms** comes largely from the `Socket.ConnectAsync(EndPoint, CancellationToken)` overload allocating a `CancellationTokenSource` and a Task state machine per call, plus JIT and runtime startup in the early rounds.
+4. **Rust produces the largest binary (461 KB)** because the whole tokio runtime is linked in statically — yet it needs the fewest source lines (733).
 
-1. Tek IP ve tek port icin baglanti kur, sonucu yazdir.
-2. Port araligi ayristirma ve sirali (tek thread) tarama.
-3. Zaman asimi ve `open/closed/filtered` ayrimi; Windows SYN retransmisyon sorununun kesfi ve duzeltmesi.
-4. Es zamanlilik: thread havuzu / async gorevler; es zamanlilik siniri.
-5. Banner toplama (1024 bayt okuma, HTTP icin istek gonderme).
-6. Rapor: tablo ve JSON. Test ve karsilastirmali olcum.
+## Requirements
 
-## Test ve dogrulama
+| Requirement | Needed for | Note |
+|---|---|---|
+| Visual Studio Build Tools (MSVC, C++ workload) | C and C++ | ships with `cl` and `cmake` |
+| CMake 3.24+ | C++ | the version bundled with Visual Studio works |
+| Rust 1.75+ (`rustup`) | Rust | `cargo` and `clippy` |
+| .NET SDK 10 | C# | `dotnet` |
+| GCC/Clang and GNU make | C and C++ on Linux | not needed on Windows |
 
-```
-C (Windows):   cd c && .\build.bat test
-C (Linux):     cd c && make test          (bellek kontrolu: make asan)
-C++:           ctest --test-dir cpp\build -C Release --output-on-failure
-Rust:          cd rust && cargo test && cargo clippy --all-targets -- -D warnings
-C#:            cd csharp && dotnet test -c Release
-```
+## Building and running
 
-Son kosu sonuclari: C 3 test ikilisi de gecti (port ayristirma, gercek loopback ag testleri, rapor), C++ 3 test hedefi de gecti, Rust 13 test 0.26 saniyede gecti (`clippy -D warnings` temiz), C# 55 test 93 ms'de gecti. C ve C++ `/W4 /WX` (MSVC) ile 0 uyari, C# `TreatWarningsAsErrors` ile 0 uyari.
-
-Kapsanan durumlar:
-- Port araligi ayristirma: tekil port, aralik, virgullu liste, cakisan araliklar, tekrar eleme, sinir degerler (1, 65535), 16 farkli gecersiz girdi (bos, 0, 65536, ters aralik, harf, bosluklu, asiri buyuk sayi).
-- Arguman ayristirma: varsayilanlar, tam komut satiri, eksik deger, sinir disi `--timeout`/`--concurrency`, gecersiz `--format`, `--help`.
-- Yerel/ozel ag tespiti: 11 yerel ornek (IPv4 ozel araliklari, loopback, link-local, IPv6 loopback/link-local/ULA/IPv4-mapped) ve 7 uzak ornek.
-- Banner temizleme: kontrol karakterlerinin `.` ile degistirilmesi, bas/son bosluk temizligi, 120 karakter siniri, bos girdi.
-- Canli ag testleri: gercek bir loopback dinleyicisi acilip acik/kapali port ayrimi dogrulanir, banner gercekten okunur, 200 portluk bir aralik 20 kez tekrar taranip sonuc kumesinin degismedigi dogrulanir (yaris/sizinti testi).
-- JSON ciktisi: alan sirasi, kacis karakterleri (`"`, `\`), yalnizca acik portlarin `open` dizisinde yer almasi.
-
-Elle dogrulanan izin akisi (Windows):
-```
-portscan.exe 127.0.0.1 --ports 20-25,80,135,445 --timeout 400 --banner   -> basarili, cikis 0
-portscan.exe 8.8.8.8 --ports 80                                         -> izin reddi, cikis 1
-```
-
-Olcum: `pwsh .\bench.ps1` (varsayilan 7 kosu, ilki atilir, `-Ports`/`-Timeout`/`-Concurrency` ile ozellestirilebilir).
-
-## Derleme ve calistirma
+To build all four languages with one command, from the repository root:
 
 ```
-C:      cd c    && make                (Linux)   veya   .\build.bat        (Windows)
-C++:    cd cpp  && cmake -S . -B build && cmake --build build --config Release
-Rust:   cd rust && cargo build --release
-C#:     cd csharp && dotnet build -c Release
+buildeverything.bat            build only
+buildeverything.bat test       build and run the tests of all four languages
 ```
 
-Calistirma ornekleri:
+The script locates the MSVC environment itself through `vswhere`, so there is no need to open a Developer Command Prompt. If a toolchain is missing (no `cargo`, for example) that language is skipped and the rest still builds. If any component fails, the exit code is 1.
+
+To build a single language:
+
+```
+C (Windows):   cd c && .\build.bat            binary: c\build\portscan.exe
+C (Linux):     cd c && make                   binary: c/build/portscan
+C++:           cd cpp && cmake -S . -B build && cmake --build build --config Release
+Rust:          cd rust && cargo build --release
+C#:            cd csharp && dotnet build -c Release
+```
+
+Run examples:
+
 ```
 c\build\portscan.exe 127.0.0.1 --ports 1-1024 --banner
 cpp\build\Release\portscan.exe scanme.nmap.org --ports 22,80 --yes-i-own-this
@@ -218,15 +221,56 @@ rust\target\release\portscan.exe 127.0.0.1 --format json --concurrency 200
 csharp\src\PortScan\bin\Release\net10.0\portscan.exe 127.0.0.1 --ports 1-65535 --timeout 500
 ```
 
-## Kabul olcutleri
+## Testing and verification
 
-| Olcut | Durum |
+```
+C (Windows):   cd c && .\build.bat test
+C (Linux):     cd c && make test          (memory check: make asan)
+C++:           ctest --test-dir cpp\build -C Release --output-on-failure
+Rust:          cd rust && cargo test && cargo clippy --all-targets -- -D warnings
+C#:            cd csharp && dotnet test -c Release
+```
+
+Latest run: all three C test binaries passed (port parsing, live network tests, reporting), all three C++ test targets passed, 13 Rust tests passed in 0.26 s with `clippy -D warnings` clean, and 55 C# tests passed in 93 ms. C and C++ report 0 warnings under `/W4 /WX`, C# reports 0 warnings under `TreatWarningsAsErrors`.
+
+Covered cases:
+- **Port range parsing:** single port, range, comma list, overlapping ranges, duplicate elimination, boundary values (1, 65535) and 16 different invalid inputs (empty, 0, 65536, reversed range, letters, leading space, oversized number).
+- **Argument parsing:** defaults, full command line, missing value, out-of-range `--timeout` and `--concurrency`, invalid `--format`, `--help`.
+- **Local/private detection:** 11 local samples (IPv4 private ranges, loopback, link-local, IPv6 loopback/link-local/ULA/IPv4-mapped) and 7 remote samples.
+- **Banner sanitising:** control bytes replaced with `.`, leading and trailing whitespace trimmed, the 120-character limit, empty input.
+- **Live network tests:** a real loopback listener is opened and the open/closed distinction is verified, a banner is genuinely read from a test server, and a 200-port range is rescanned 20 times to confirm the result set does not change (race and leak check).
+- **JSON output:** field order, escaping of `"` and `\`, and that only open ports appear in the `open` array.
+
+Permission guard verified manually (Windows):
+
+```
+portscan.exe 127.0.0.1 --ports 20-25,80,135,445 --timeout 400 --banner   -> succeeds, exit 0
+portscan.exe 8.8.8.8 --ports 80                                          -> refused, exit 1
+```
+
+Benchmarking: `pwsh .\bench.ps1` (7 runs by default, the first one discarded; `-Ports`, `-Timeout` and `-Concurrency` can be overridden).
+
+## Development stages
+
+1. Connect to a single IP and port, print the result.
+2. Port range parsing and a sequential, single-threaded scan.
+3. Timeouts and the `open`/`closed`/`filtered` distinction; discovery and fix of the Windows SYN retransmission problem.
+4. Concurrency: thread pool / async tasks, with a concurrency limit.
+5. Banner grabbing (1024-byte read, HTTP probe where needed).
+6. Reporting: table and JSON. Tests and comparative benchmarks.
+
+## Acceptance criteria
+
+| Criterion | Status |
 |---|---|
-| Dort dil ayni portlari ayni durumla raporluyor | tamam (canli sistem farki disinda, bkz. tablo notu) |
-| Es zamanlilik siniri asilmiyor | tamam, semaphore/havuz ile sinirlanir |
-| JSON ciktisi gecerli | tamam, testlerde dogrulandi |
-| Izin kontrolu (yerel olmayan hedef) | tamam, dort dilde canli test edildi |
-| 65535 port taramasinda soket/handle sizintisi yok | tamam, 20 tekrarli test ile dogrulandi (200 port araliginda); tam 65535 port taramasi tek seferlik olcumle dogrulandi |
-| Derleyici uyarisi yok | tamam (`/W4 /WX`, `-Wall -Wextra -Werror`, `clippy -D warnings`, `TreatWarningsAsErrors`) |
-| Karsilastirma tablosu gercek olcumlerle dolduruldu | tamam |
-| edu.md tamamlandi | tamam |
+| All four languages report the same ports with the same state | done (apart from live system variance, see the table note) |
+| The concurrency limit is never exceeded | done, enforced by semaphore / thread pool |
+| JSON output is valid | done, verified in tests |
+| Permission guard for non-local targets | done, live-tested in all four languages |
+| No socket or handle leak in a 65535-port scan | done; verified by a 20-round repeat test over a 200-port range, plus a one-shot full 65535-port measurement |
+| No compiler warnings | done (`/W4 /WX`, `-Wall -Wextra -Werror`, `clippy -D warnings`, `TreatWarningsAsErrors`) |
+| Comparison table filled with real measurements | done |
+
+## License
+
+MIT. See [LICENSE](LICENSE).
