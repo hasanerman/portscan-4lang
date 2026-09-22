@@ -1,5 +1,7 @@
 # portscan-4lang - Asynchronous Port Scanner and Banner Grabber
 
+[![build](https://github.com/hasanerman/portscan-4lang/actions/workflows/build.yml/badge.svg)](https://github.com/hasanerman/portscan-4lang/actions/workflows/build.yml)
+
 The same port scanner, written four times: in C, C++, Rust and C#. All four implement the same command line contract, print the same table and pass the same tests. Then the difference between them is measured.
 
 Status: all four languages are complete, they build, their tests pass and the benchmarks have been taken.
@@ -46,13 +48,14 @@ JSON output:
 
 ## File count and layout
 
-62 files in total: 1 document, 1 benchmark script, 1 build-all script, 3 repository files and 56 source files (C 19, C++ 16, Rust 11, C# 10).
+63 files in total: 1 document, 1 benchmark script, 1 build-all script, 1 CI workflow, 3 repository files and 56 source files (C 19, C++ 16, Rust 11, C# 10).
 
 ```
 portscan-4lang/
   README.md
   bench.ps1                  (PowerShell script that benchmarks all four binaries)
   buildeverything.bat        (builds and tests all four languages with one command)
+  .github/workflows/build.yml (CI: builds and tests all four languages on Windows and Linux)
   LICENSE
   .gitignore
   .gitattributes

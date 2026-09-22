@@ -8,12 +8,16 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 typedef SOCKET sock_t;
+typedef int sock_addr_len_t;
+typedef int sock_io_len_t;
 #define SOCK_INVALID INVALID_SOCKET
 #else
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 typedef int sock_t;
+typedef socklen_t sock_addr_len_t;
+typedef size_t sock_io_len_t;
 #define SOCK_INVALID (-1)
 #endif
 

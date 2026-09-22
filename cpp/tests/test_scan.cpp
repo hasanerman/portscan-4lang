@@ -12,6 +12,7 @@
 #ifdef _WIN32
 using addr_len_t = int;
 #else
+#include <unistd.h>
 using addr_len_t = socklen_t;
 #endif
 

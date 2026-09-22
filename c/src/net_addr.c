@@ -134,12 +134,12 @@ int net_format(const NetAddress *address, char *text, size_t text_len) {
     if (address->family == AF_INET) {
         struct sockaddr_in v4;
         memcpy(&v4, &address->storage, sizeof(v4));
-        return inet_ntop(AF_INET, &v4.sin_addr, text, text_len) != NULL;
+        return inet_ntop(AF_INET, &v4.sin_addr, text, (sock_addr_len_t)text_len) != NULL;
     }
     if (address->family == AF_INET6) {
         struct sockaddr_in6 v6;
         memcpy(&v6, &address->storage, sizeof(v6));
-        return inet_ntop(AF_INET6, &v6.sin6_addr, text, text_len) != NULL;
+        return inet_ntop(AF_INET6, &v6.sin6_addr, text, (sock_addr_len_t)text_len) != NULL;
     }
     return 0;
 }

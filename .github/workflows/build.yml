@@ -1,0 +1,78 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  windows:
+    name: windows (msvc)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: C - build and test
+        shell: cmd
+        run: .\c\build.bat test
+
+      - name: C++ - configure
+        run: cmake -S cpp -B cpp/build -A x64
+
+      - name: C++ - build
+        run: cmake --build cpp/build --config Release
+
+      - name: C++ - test
+        run: ctest --test-dir cpp/build -C Release --output-on-failure
+
+      - name: Rust - test
+        run: cargo test --manifest-path rust/Cargo.toml
+
+      - name: Rust - clippy
+        run: cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
+
+      - name: C# - test
+        run: dotnet test csharp/PortScan.slnx -c Release
+
+  linux:
+    name: linux (gcc)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: C - build and test
+        run: make -C c test
+
+      - name: C++ - configure
+        run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
+
+      - name: C++ - build
+        run: cmake --build cpp/build
+
+      - name: C++ - test
+        run: ctest --test-dir cpp/build --output-on-failure
+
+      - name: Rust - test
+        run: cargo test --manifest-path rust/Cargo.toml
+
+      - name: Rust - clippy
+        run: cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
+
+      - name: C# - test
+        run: dotnet test csharp/PortScan.slnx -c Release

@@ -81,7 +81,7 @@ static int is_in_progress(int error) {
 }
 
 ConnectResult net_connect(sock_t handle, const NetAddress *address, int *error) {
-    int status = connect(handle, (const struct sockaddr *)&address->storage, (int)address->length);
+    int status = connect(handle, (const struct sockaddr *)&address->storage, (sock_addr_len_t)address->length);
 
     *error = 0;
     if (status == 0) {
@@ -164,11 +164,11 @@ ConnectOutcome net_classify(int error) {
 }
 
 long net_send(sock_t handle, const char *data, size_t length) {
-    return (long)send(handle, data, (int)length, MSG_NOSIGNAL);
+    return (long)send(handle, data, (sock_io_len_t)length, MSG_NOSIGNAL);
 }
 
 long net_recv(sock_t handle, unsigned char *buffer, size_t length) {
-    return (long)recv(handle, (char *)buffer, (int)length, 0);
+    return (long)recv(handle, (char *)buffer, (sock_io_len_t)length, 0);
 }
 
 uint64_t net_now_us(void) {
